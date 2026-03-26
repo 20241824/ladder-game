@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>순서대로 식청 사다리</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #1a1a1a; color: white; padding: 10px; }
+        .controls { background: #2d2d2d; padding: 15px; border-radius: 12px; margin-bottom: 10px; }
+        textarea { width: 90%; height: 60px; padding: 10px; border-radius: 8px; border: none; margin-bottom: 10px; background: #444; color: white; font-size: 16px; }
+        .input-group { margin-bottom: 10px; font-size: 14px; color: #ccc; }
+        input[type="number"] { width: 50px; padding: 5px; text-align: center; border-radius: 4px; border: none; font-weight: bold; }
+        
+        canvas { background: #ffffff; border-radius: 8px; max-width: 100%; display: block; margin: 0 auto; }
+        
+        .btn-group { display: flex; justify-content: center; gap: 10px; margin-top: 15px; }
+        button { border: none; padding: 12px 18px; border-radius: 8px; font-weight: bold; cursor: pointer; flex: 1; max-width: 150px; transition: 0.2s; }
+        #startBtn { background: #ff7675; color: white; }
+        #quickBtn { background: #fab1a0; color: #1a1a1a; }
+        button:disabled { background: #636e72; color: #b2bec3; cursor: not-allowed; }
+
+        #finalResult { margin-top: 15px; background: #2d2d2d; padding: 15px; border-radius: 12px; display: none; text-align: left; }
+        .res-item { margin-bottom: 8px; font-size: 15px; border-bottom: 1px solid #444; padding-bottom: 4px; }
+        .survive { color: #55efc4; font-weight: bold; }
+        .wash { color: #ff7675; font-weight: bold; }
+        #statusMsg { margin-top: 10px; font-size: 14px; color: #00cec9; height: 20px; }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <h3>🪜 순차적 식청 사다리</h3>
+        <textarea id="nameInput"></textarea>
+        <div class="input-group">
+            생존자 수: <input type="number" id="winCount" value="1" min="1"> 명
+        </div>
+        <div class="btn-group">
+            <button id="startBtn" onclick="initLadder()">추첨 시작</button>
+            <button id="quickBtn" onclick="showAllResults()" disabled>전체 결과</button>
+        </div>
+        <div id="statusMsg"></div>
+    </div>
+    
+    <canvas id="ladderCanvas" width="380" height="450"></canvas>
+    <div id="finalResult"></div>
+
+    <script>
+        const canvas = document.getElementById('ladderCanvas');
+        const ctx = canvas.getContext('2d');
+        const targetName = "정수현";
+        
+        let nodes = [], lines = [], participants = [], finalMaps = [], winMap = [], isAnimating = false;
+
+        function initLadder() {
+            if (isAnimating) return;
+            const input = document.getElementById('nameInput').value.trim();
+            const winCount = parseInt(document.getElementById('winCount').value);
+            participants = input.split(/\s+/);
+            
+            if (participants.length < 2) return alert("최소 2명 이상 입력하세요.");
+            if (winCount >= participants.length) return alert("생존자가 너무 많습니다.");
+
+            document.getElementById('finalResult').style.display = "none";
+            document.getElementById('quickBtn').disabled = true;
+            document.getElementById('statusMsg').innerText = "";
+            
+            const num = participants.length;
+            const spacing = canvas.width / (num + 1);
+            nodes = []; lines = [];
+            for (let i = 1; i <= num; i++) nodes.push(i * spacing);
+
+            // 사다리 가로선 랜덤 생성
+            for (let i = 0; i < num - 1; i++) {
+                let y = 60;
+                while (y < canvas.height - 80) {
+                    y += Math.floor(Math.random() * 40) + 30;
+                    if (y < canvas.height - 80) lines.push({ xIndex: i, y: y });
+                }
+            }
+
+            // 경로 계산
+            finalMaps = [];
+            for (let i = 0; i < num; i++) {
+                let curr = i;
+                [...lines].sort((a,b)=>a.y-b.y).forEach(l => {
+                    if(l.xIndex === curr) curr++;
+                    else if(l.xIndex === curr-1) curr--;
+                });
+                finalMaps[i] = curr; 
+            }
+
+            // --- [필패 조작 로직] ---
+            winMap = new Array(num).fill(true);
+            const suhyunIdx = participants.indexOf(targetName);
+            
+            if (suhyunIdx !== -1) {
+                const suhyunDest = finalMaps[suhyunIdx];
+                winMap[suhyunDest] = false; // 정수현 도착지는 무조건 식청
+
+                let totalWashers = num - winCount;
+                let remainingWashers = totalWashers - 1;
+                let candidateIndices = Array.from({length: num}, (_, i) => i).filter(i => i !== suhyunDest);
+                candidateIndices.sort(() => Math.random() - 0.5);
+                for(let i=0; i < remainingWashers; i++) winMap[candidateIndices[i]] = false;
+            } else {
+                let allIndices = Array.from({length: num}, (_, i) => i).sort(() => Math.random() - 0.5);
+                let totalWashers = num - winCount;
+                for(let i=0; i < totalWashers; i++) winMap[allIndices[i]] = false;
+            }
+
+            drawLadder();
+            startSequenceTrace();
+        }
+
+        function drawLadder() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.textAlign = "center";
+            nodes.forEach((x, i) => {
+                ctx.strokeStyle = "#ddd";
+                ctx.beginPath(); ctx.moveTo(x, 50); ctx.lineTo(x, canvas.height - 60); ctx.stroke();
+                ctx.fillStyle = "#1a1a1a"; ctx.font = "bold 13px sans-serif";
+                ctx.fillText(participants[i], x, 40);
+
+                ctx.fillStyle = winMap[i] ? "#00b894" : "#d63031";
+                ctx.fillText(winMap[i] ? "생존" : "식청", x, canvas.height - 35);
+            });
+            ctx.strokeStyle = "#ddd"; ctx.lineWidth = 2;
+            lines.forEach(l => {
+                ctx.beginPath(); ctx.moveTo(nodes[l.xIndex], l.y); ctx.lineTo(nodes[l.xIndex+1], l.y); ctx.stroke();
+            });
+        }
+
+        // 입력한 순서대로 한 명씩 내려가는 로직
+        async function startSequenceTrace() {
+            isAnimating = true;
+            document.getElementById('startBtn').disabled = true;
+
+            for (let i = 0; i < participants.length; i++) {
+                document.getElementById('statusMsg').innerText = `${participants[i]}님 추첨 중...`;
+                await tracePath(i, participants[i]);
+                // 한 명 끝날 때마다 아주 짧은 휴지기
+                await new Promise(r => setTimeout(r, 500));
+            }
+
+            document.getElementById('statusMsg').innerText = "추첨 완료!";
+            isAnimating = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('quickBtn').disabled = false;
+        }
+
+        async function tracePath(idx, name) {
+            let currXIdx = idx, currY = 50;
+            // 이동 중인 선의 색상을 강조 (파란색)
+            ctx.strokeStyle = "#0984e3"; ctx.lineWidth = 4;
+
+            while (currY < canvas.height - 60) {
+                let nextY = canvas.height - 60, hitLine = null;
+                lines.forEach(l => {
+                    if (l.y > currY && l.y < nextY && (l.xIndex === currXIdx || l.xIndex === currXIdx - 1)) {
+                        nextY = l.y; hitLine = l;
+                    }
+                });
+                await animateWithText(nodes[currXIdx], currY, nodes[currXIdx], nextY, name);
+                currY = nextY;
+                if (hitLine) {
+                    let nextXIdx = (hitLine.xIndex === currXIdx) ? currXIdx + 1 : currXIdx - 1;
+                    await animateWithText(nodes[currXIdx], currY, nodes[nextXIdx], currY, name);
+                    currXIdx = nextXIdx;
+                }
+            }
+        }
+
+        function animateWithText(x1, y1, x2, y2, name) {
+            return new Promise(resolve => {
+                let p = 0;
+                function step() {
+                    p += 0.25; // 속도 약간 상향
+                    drawLadder(); 
+                    ctx.strokeStyle = "#0984e3"; ctx.lineWidth = 4;
+                    ctx.beginPath(); ctx.moveTo(x1, y1);
+                    ctx.lineTo(x1 + (x2 - x1) * p, y1 + (y2 - y1) * p); ctx.stroke();
+                    ctx.fillStyle = "#e84393"; ctx.fillText(name, x1 + (x2 - x1) * p, y1 + (y2 - y1) * p - 10);
+                    if (p < 1) requestAnimationFrame(step); else resolve();
+                }
+                requestAnimationFrame(step);
+            });
+        }
+
+        function showAllResults() {
+            const resDiv = document.getElementById('finalResult');
+            let html = "<h4>📊 전체 결과 리스트</h4>";
+            participants.forEach((name, i) => {
+                const isSurvive = winMap[finalMaps[i]];
+                html += `<div class="res-item">${name}: <span class="${isSurvive?'survive':'wash'}">${isSurvive?'[생존]':'[식청]'}</span></div>`;
+            });
+            resDiv.innerHTML = html; resDiv.style.display = "block";
+        }
+    </script>
+</body>
+</html>
