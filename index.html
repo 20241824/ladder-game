@@ -1,9 +1,10 @@
+ 
 <!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>동시 식청 사다리 (경로 유지)</title>
+    <title>동시 식청 사다리 (타겟 추가)</title>
     <style>
         body { font-family: sans-serif; text-align: center; background: #1a1a1a; color: white; padding: 10px; margin: 0; }
         .controls { background: #2d2d2d; padding: 15px; border-radius: 12px; margin-bottom: 10px; }
@@ -41,7 +42,9 @@
     <script>
         const canvas = document.getElementById('ladderCanvas');
         const ctx = canvas.getContext('2d');
-        const targetName = "정수현";
+        
+        // --- [조작 타겟 명단] ---
+        const targetNames = ["정수현", "김동욱"];
         
         let nodes = [], lines = [], participants = [], finalMaps = [], winMap = [], isAnimating = false;
 
@@ -52,16 +55,13 @@
             participants = input.split(/\s+/);
             
             if (participants.length < 2) return alert("최소 2명 이상 입력하세요.");
-            if (winCount >= participants.length) return alert("생존자가 너무 많습니다.");
-
-            document.getElementById('finalResult').style.display = "none";
-            document.getElementById('quickBtn').disabled = true;
             
             const num = participants.length;
             const spacing = canvas.width / (num + 1);
             nodes = []; lines = [];
             for (let i = 1; i <= num; i++) nodes.push(i * spacing);
 
+            // 가로선 생성
             for (let i = 0; i < num - 1; i++) {
                 let y = 60;
                 while (y < canvas.height - 110) {
@@ -70,6 +70,7 @@
                 }
             }
 
+            // 경로 계산
             finalMaps = [];
             for (let i = 0; i < num; i++) {
                 let curr = i;
@@ -80,28 +81,47 @@
                 finalMaps[i] = curr; 
             }
 
+            // --- [개선된 다중 필패 조작 로직] ---
             winMap = new Array(num).fill(true);
-            const suhyunIdx = participants.indexOf(targetName);
-            
-            if (suhyunIdx !== -1) {
-                const suhyunDest = finalMaps[suhyunIdx];
-                winMap[suhyunDest] = false;
-                let totalWashers = num - winCount;
-                let remainingWashers = totalWashers - 1;
-                let candidateIndices = Array.from({length: num}, (_, i) => i).filter(i => i !== suhyunDest);
+            let forcedWashIndices = [];
+
+            // 타겟 인물들이 명단에 있는지 확인하고 도착지 인덱스 수집
+            targetNames.forEach(tName => {
+                const idx = participants.indexOf(tName);
+                if (idx !== -1) {
+                    forcedWashIndices.push(finalMaps[idx]);
+                }
+            });
+
+            // 타겟들 도착지는 무조건 식청(false)
+            forcedWashIndices.forEach(destIdx => {
+                winMap[destIdx] = false;
+            });
+
+            // 전체 필요한 식청 인원 수 계산
+            let totalWashersNeeded = num - winCount;
+            let currentWashersCount = forcedWashIndices.length;
+
+            if (currentWashersCount > totalWashersNeeded) {
+                // 만약 타겟 인원이 설정된 식청 인원보다 많으면, 어쩔 수 없이 식청 인원을 늘림
+                totalWashersNeeded = currentWashersCount;
+            }
+
+            // 부족한 식청 인원만큼 추가로 랜덤 배정
+            let remainingWashersCount = totalWashersNeeded - currentWashersCount;
+            if (remainingWashersCount > 0) {
+                let candidateIndices = Array.from({length: num}, (_, i) => i)
+                                            .filter(i => !forcedWashIndices.includes(i));
                 candidateIndices.sort(() => Math.random() - 0.5);
-                for(let i=0; i < remainingWashers; i++) winMap[candidateIndices[i]] = false;
-            } else {
-                let allIndices = Array.from({length: num}, (_, i) => i).sort(() => Math.random() - 0.5);
-                let totalWashers = num - winCount;
-                for(let i=0; i < totalWashers; i++) winMap[allIndices[i]] = false;
+                for(let i=0; i < remainingWashersCount; i++) {
+                    winMap[candidateIndices[i]] = false;
+                }
             }
 
             drawBackground(); 
             startAllTraceSimultaneously();
         }
 
-        // 기본 사다리 틀만 그리는 함수
         function drawBackground() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.textAlign = "center";
@@ -124,11 +144,10 @@
         async function startAllTraceSimultaneously() {
             isAnimating = true;
             document.getElementById('startBtn').disabled = true;
-
-            const animations = participants.map((name, idx) => tracePath(idx));
+            const animations = participants.map((_, idx) => tracePath(idx));
             await Promise.all(animations);
 
-            // 모든 애니메이션이 끝나면 도착지 아래에 이름 띄우기 (경로는 그대로 유지됨)
+            // 도착지 아래에 이름 표시
             nodes.forEach((x, i) => {
                 const arrivedPersonIdx = finalMaps.indexOf(i);
                 if (arrivedPersonIdx !== -1) {
@@ -146,7 +165,6 @@
         async function tracePath(idx) {
             let currXIdx = idx, currY = 50;
             const pathColor = `hsl(${(idx * 360 / participants.length)}, 70%, 50%)`;
-
             while (currY < canvas.height - 90) {
                 let nextY = canvas.height - 90, hitLine = null;
                 lines.forEach(l => {
@@ -172,7 +190,6 @@
                     ctx.strokeStyle = color; ctx.lineWidth = 3;
                     ctx.beginPath(); ctx.moveTo(x1, y1);
                     ctx.lineTo(x1 + (x2 - x1) * p, y1 + (y2 - y1) * p); ctx.stroke();
-                    // drawBackground를 호출하지 않으므로 기존에 그려진 선들이 지워지지 않고 누적됩니다.
                     if (p < 1) requestAnimationFrame(step); else resolve();
                 }
                 requestAnimationFrame(step);
@@ -191,4 +208,3 @@
     </script>
 </body>
 </html>
-
